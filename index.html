@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>Abide · Accountability partner</title>
+<style>
+  :root { --ink:#14161A; --panel:#1E2127; --gold:#E2C089; --soft:#E9E6E0; --muted:#9AA0A8; --warn:#E59A7A; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--ink); color:var(--soft); font:17px/1.55 Georgia, "Times New Roman", serif; }
+  main { max-width:560px; margin:0 auto; padding:36px 22px 60px; }
+  h1 { font-weight:normal; font-size:28px; margin:0 0 6px; }
+  .brand { color:var(--gold); letter-spacing:.08em; text-transform:uppercase; font:600 13px/1 system-ui, sans-serif; margin-bottom:28px; }
+  .card { background:var(--panel); border-radius:16px; padding:20px; margin:18px 0; }
+  p { margin:0 0 14px; }
+  .muted { color:var(--muted); font-size:15px; }
+  .gold { color:var(--gold); }
+  button { font:600 16px system-ui, sans-serif; border:0; border-radius:10px; padding:14px 18px; width:100%; margin-top:10px; cursor:pointer; }
+  .primary { background:var(--gold); color:var(--ink); }
+  .secondary { background:transparent; color:var(--soft); border:1px solid #3a3e46; }
+  .choice { display:flex; gap:10px; }
+  .choice button { margin-top:0; }
+  .choice button.on { outline:2px solid var(--gold); }
+  textarea { width:100%; min-height:96px; background:#15171b; color:var(--soft); border:1px solid #3a3e46; border-radius:10px; padding:12px; font:16px/1.45 system-ui, sans-serif; margin-top:10px; }
+  .error { color:var(--warn); }
+  .verse { font-style:italic; color:var(--muted); }
+  ul { padding-left:20px; margin:0 0 14px; } li { margin-bottom:6px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">Abide</div>
+  <div id="app"><p class="muted">Loading…</p></div>
+</main>
+<script>
+(() => {
+  const params = new URLSearchParams(location.hash.slice(1));
+  const token = params.get("t") || "";
+  const server = (params.get("s") || "").replace(/\/$/, "");
+  let action = params.get("a") || "view";
+  const app = document.getElementById("app");
+
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+  const first = (n) => (n || "").split(/\s+/)[0] || n;
+  const when = (iso) => new Date(iso).toLocaleString("en-GB", { weekday:"long", day:"numeric", month:"long", hour:"2-digit", minute:"2-digit" });
+  const hoursLeft = (iso) => Math.max(0, Math.round((new Date(iso) - Date.now()) / 3600000));
+
+  async function call(act, extra = {}) {
+    const r = await fetch(server + "/functions/v1/partner", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, action: act, ...extra }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || "Something went wrong. Please try again.");
+    return body;
+  }
+
+  function show(html) { app.innerHTML = html; }
+  function error(msg) { show(`<div class="card"><p class="error">${esc(msg)}</p><p class="muted">If this keeps happening, reply to the email you received.</p></div>`); }
+
+  function render(d, notice) {
+    const o = esc(d.ownerName), of = esc(first(d.ownerName));
+    if (d.status === "revoked" || d.status === "expired") {
+      return show(`<h1>Thank you</h1><div class="card"><p>This link is no longer active. ${o} has updated their accountability partners, or the invitation has expired.</p></div>`);
+    }
+    if (d.status === "declined") {
+      return show(`<h1>No problem</h1><div class="card"><p>You've declined ${o}'s invitation. Nothing more will be sent to you.</p><button class="secondary" id="accept">I've changed my mind: accept</button></div>`), bind();
+    }
+    if (d.status === "invited") {
+      return show(`
+        <h1>Hi ${esc(first(d.partnerName))}</h1>
+        <p>${o} has asked you to be one of three accountability partners in Abide.</p>
+        <div class="card">
+          <p>Abide is a Christian app that helps ${of} keep the limits they've set on social media and games, and use that time for Scripture, prayer and their goals.</p>
+          <p class="gold">As a partner you would:</p>
+          <ul>
+            <li>get the weekly summaries ${of} chooses to share</li>
+            <li>hear when they'd value a check-in or have something to celebrate</li>
+            <li>be asked for your view if they ever want to remove the app (a 48-hour request, not an instant decision)</li>
+          </ul>
+          <p class="muted">You won't see their journal, prayers or recordings, and you can't change anything on their phone. You don't need to install anything.</p>
+          <button class="primary" id="accept">Accept</button>
+          <button class="secondary" id="decline">Not right now</button>
+        </div>`), bind();
+    }
+
+    // Active partner
+    let html = notice ? `<div class="card"><p class="gold">${esc(notice)}</p></div>` : "";
+    html += `<h1>${of}'s partner</h1>`;
+    if (d.request) {
+      const mine = d.request.myResponse;
+      html += `
+        <div class="card">
+          <p>${o} has asked to remove Abide. The request is open until <span class="gold">${esc(when(d.request.endsAt))}</span> (about ${hoursLeft(d.request.endsAt)} hours).</p>
+          <p class="muted">${of} will see your answer and note in the app. They can cancel the request at any time.</p>
+          <div class="choice">
+            <button class="secondary ${mine?.choice === "keep" ? "on" : ""}" data-choice="keep">I'd prefer you keep it</button>
+            <button class="secondary ${mine?.choice === "approve" ? "on" : ""}" data-choice="approve">I'm happy for you to remove it</button>
+          </div>
+          <textarea id="note" placeholder="A note of encouragement (optional)">${esc(mine?.note || "")}</textarea>
+          <button class="primary" id="respond">${mine ? "Update my answer" : "Send my answer"}</button>
+        </div>`;
+    } else {
+      html += `<div class="card"><p>There's nothing waiting for you right now. Thank you for standing with ${of}.</p></div>`;
+    }
+    html += `
+      <div class="card">
+        <p>Send ${of} a word of encouragement. It appears on their Abide home screen.</p>
+        <textarea id="enc" placeholder="Proud of you…"></textarea>
+        <button class="primary" id="encourage">Send</button>
+      </div>
+      <p class="verse">“Two are better than one… For if they fall, the one will lift up his fellow.” Ecclesiastes 4:9–10 (WEB)</p>`;
+    show(html);
+    bind();
+    if (action === "encourage") document.getElementById("enc")?.focus();
+  }
+
+  let chosen = null;
+  function bind() {
+    const on = (id, f) => document.getElementById(id)?.addEventListener("click", f);
+    on("accept", () => run("accept", {}, "Thank you. You're now one of the partners."));
+    on("decline", () => run("decline"));
+    document.querySelectorAll("[data-choice]").forEach((b) => b.addEventListener("click", () => {
+      chosen = b.dataset.choice;
+      document.querySelectorAll("[data-choice]").forEach((x) => x.classList.toggle("on", x === b));
+    }));
+    const current = document.querySelector("[data-choice].on");
+    if (current) chosen = current.dataset.choice;
+    on("respond", () => {
+      if (!chosen) return alertInline("Choose one of the two options first.");
+      run("respond", { choice: chosen, note: document.getElementById("note").value }, "Thank you. Your answer has been sent.");
+    });
+    on("encourage", () => {
+      const note = document.getElementById("enc").value.trim();
+      if (!note) return alertInline("Write a short message first.");
+      run("encourage", { note }, "Sent. It'll appear on their home screen.");
+    });
+  }
+
+  function alertInline(msg) {
+    let e = document.getElementById("inline-error");
+    if (!e) { e = document.createElement("p"); e.id = "inline-error"; e.className = "error"; app.prepend(e); }
+    e.textContent = msg;
+  }
+
+  async function run(act, extra = {}, notice) {
+    try {
+      document.querySelectorAll("button").forEach((b) => (b.disabled = true));
+      const d = await call(act, extra);
+      action = "view";
+      render(d, notice);
+    } catch (e) {
+      error(e.message);
+    }
+  }
+
+  if (!token || !/^https:\/\/[a-z0-9]+\.supabase\.co$/.test(server)) return error("This link is incomplete. Please open it from the email again.");
+  run("view");
+})();
+</script>
+</body>
+</html>
