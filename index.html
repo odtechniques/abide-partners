@@ -33,11 +33,13 @@
 <main>
   <div class="brand">Abide</div>
   <div id="app"><p class="muted">Loading…</p></div>
+  <p class="muted" style="margin-top:40px"><a href="privacy.html" style="color:#E2C089">Privacy notice</a></p>
 </main>
 <script>
 (() => {
   const params = new URLSearchParams(location.hash.slice(1));
   const token = params.get("t") || "";
+  const ownerToken = params.get("o") || "";
   const server = (params.get("s") || "").replace(/\/$/, "");
   let action = params.get("a") || "view";
   const app = document.getElementById("app");
@@ -157,7 +159,37 @@
     }
   }
 
-  if (!token || !/^https:\/\/[a-z0-9]+\.supabase\.co$/.test(server)) return error("This link is incomplete. Please open it from the email again.");
+  if (!/^https:\/\/[a-z0-9]+\.supabase\.co$/.test(server)) return error("This link is incomplete. Please open it from the email again.");
+
+  // The owner's own link: confirm Abide was removed on purpose.
+  if (ownerToken) {
+    const ownerCall = async (act) => {
+      const r = await fetch(server + "/functions/v1/partner", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ownerToken, action: act }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || "Something went wrong. Please try again.");
+      return body;
+    };
+    const renderOwner = (d) => {
+      if (d.removedConfirmed) {
+        return show(`<h1>Thank you</h1><div class="card"><p>Your partners have been told you removed Abide on purpose.</p><p class="muted">If you reinstall it, you can reconnect with them from the Partners screen.</p></div>`);
+      }
+      show(`<h1>Hi ${esc(first(d.ownerName))}</h1>
+        <div class="card">
+          <p>Abide hasn't checked in from your phone for a while, so your partners were told its status is unavailable.</p>
+          <p>If you removed Abide on purpose, you can let them know. If your phone is just off or offline, you don't need to do anything.</p>
+          <button class="primary" id="confirm">I removed Abide on purpose</button>
+        </div>`);
+      document.getElementById("confirm").addEventListener("click", async () => {
+        try { renderOwner(await ownerCall("confirmRemoved")); } catch (e) { error(e.message); }
+      });
+    };
+    ownerCall("view").then(renderOwner).catch((e) => error(e.message));
+    return;
+  }
+  if (!token) return error("This link is incomplete. Please open it from the email again.");
   run("view");
 })();
 </script>
